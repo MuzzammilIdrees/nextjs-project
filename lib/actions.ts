@@ -2,7 +2,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
-import { sql } from "./db";
+import { prisma } from "./prisma"; // Replaced raw SQL with Prisma Client
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -23,11 +23,15 @@ export async function createBlog(formData: FormData) {
   const excerpt = formData.get("excerpt") as string;
   const content = formData.get("content") as string;
 
-  // 3. Insert the blog WITH the user_id
-  await sql`
-    INSERT INTO blogs (title, excerpt, content, user_id)
-    VALUES (${title}, ${excerpt}, ${content}, ${userId})
-  `;
+  // 3. Insert the blog using Prisma
+  await prisma.blog.create({
+    data: {
+      title,
+      excerpt,
+      content,
+      user_id: Number(userId),
+    },
+  });
 
   // 4. Clear the cache and redirect to dashboard
   revalidatePath("/");
@@ -37,14 +41,18 @@ export async function createBlog(formData: FormData) {
 
 // READ (All)
 export async function getBlogs() {
-  const blogs = await sql`SELECT * FROM blogs ORDER BY created_at DESC`;
+  const blogs = await prisma.blog.findMany({
+    orderBy: { created_at: "desc" },
+  });
   return blogs;
 }
 
 // READ (Single)
 export async function getBlogById(id: string) {
-  const blogs = await sql`SELECT * FROM blogs WHERE id = ${id}`;
-  return blogs[0];
+  const blog = await prisma.blog.findUnique({
+    where: { id: Number(id) },
+  });
+  return blog;
 }
 
 // UPDATE
@@ -60,12 +68,14 @@ export async function updateBlog(id: number, formData: FormData) {
   const excerpt = formData.get("excerpt") as string;
   const content = formData.get("content") as string;
 
-  // Enforce ownership: Only update if the user_id matches the logged-in user
-  await sql`
-    UPDATE blogs 
-    SET title = ${title}, excerpt = ${excerpt}, content = ${content}
-    WHERE id = ${id} AND user_id = ${userId}
-  `;
+  // Enforce ownership using updateMany (ensures both ID and user_id match)
+  await prisma.blog.updateMany({
+    where: { 
+      id: Number(id),
+      user_id: Number(userId),
+    },
+    data: { title, excerpt, content },
+  });
 
   revalidatePath("/");
   revalidatePath("/admin");
@@ -82,7 +92,12 @@ export async function deleteBlog(id: number) {
   const userId = (session.user as any).id;
 
   // Enforce ownership: Only delete if the user_id matches the logged-in user
-  await sql`DELETE FROM blogs WHERE id = ${id} AND user_id = ${userId}`;
+  await prisma.blog.deleteMany({
+    where: { 
+      id: Number(id),
+      user_id: Number(userId),
+    },
+  });
   
   revalidatePath("/");
   revalidatePath("/admin");
@@ -91,22 +106,24 @@ export async function deleteBlog(id: number) {
 
 export async function getUserBlogs(userId: string | number) {
   // Fetch only the blogs where the user_id matches the logged-in user
-  const blogs = await sql`
-    SELECT * FROM blogs 
-    WHERE user_id = ${userId} 
-    ORDER BY id DESC
-  `;
+  const blogs = await prisma.blog.findMany({
+    where: { user_id: Number(userId) },
+    orderBy: { id: "desc" },
+  });
   
   return blogs;
 }
 
 export async function getUsers() {
   // Fetch all users except passwords for security
-  const users = await sql`
-    SELECT id, username, role 
-    FROM users 
-    ORDER BY id ASC
-  `;
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      username: true,
+      role: true,
+    },
+    orderBy: { id: "asc" },
+  });
   return users;
 }
 
@@ -117,7 +134,10 @@ export async function deleteUser(id: number) {
     throw new Error("Unauthorized: Only admins can delete users.");
   }
 
-  await sql`DELETE FROM users WHERE id = ${id}`;
+  await prisma.user.delete({
+    where: { id: Number(id) },
+  });
+  
   // Refresh the page data after deletion
   revalidatePath("/admin/users");
 }
@@ -134,10 +154,9 @@ export async function createUser(formData: FormData) {
   const role = formData.get("role") as string;
 
   // Insert the new user into the database
-  await sql`
-    INSERT INTO users (username, password, role)
-    VALUES (${username}, ${password}, ${role})
-  `;
+  await prisma.user.create({
+    data: { username, password, role },
+  });
 
   // Refresh the page so the new user instantly appears in the table
   revalidatePath("/admin/users");

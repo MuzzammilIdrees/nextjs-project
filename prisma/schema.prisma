@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id       Int    @id @default(autoincrement())
+  username String @unique
+  password String
+  role     String @default("user")
+  
+  blogs    Blog[] 
+  
+  @@map("users")
+}
+
+model Blog {
+  id         Int      @id @default(autoincrement())
+  title      String
+  excerpt    String   
+  content    String
+  created_at DateTime @default(now())
+  
+  user_id    Int      
+  author     User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("blogs")
+}
